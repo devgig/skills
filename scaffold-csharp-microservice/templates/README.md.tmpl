@@ -1,0 +1,44 @@
+# {{SERVICE_NAME}}
+
+.NET 8 microservice scaffolded from `scaffold-csharp-microservice`.
+
+## Layout
+
+```
+src/
+  Service/          ASP.NET Core minimal-API host (Program.cs, Endpoints/, Models/, Validators/, Middleware/, Extensions/)
+  Application/      MediatR commands, queries, handlers, application services
+  Domain/           Entities, repository interfaces + Mongo implementations
+  Infrastructure/   IRepository + BaseRepository<T> (generic Mongo CRUD)
+tests/
+  UnitTests/        xUnit + Moq + FluentAssertions
+  IntegrationTests/ xUnit + EphemeralMongo + WebApplicationFactory
+```
+
+## Prerequisites
+
+- .NET 8 SDK
+- MongoDB (locally via `brew services start mongodb-community@8.0` or Docker)
+
+## Run
+
+```bash
+dotnet run --project src/Service
+```
+
+Swagger UI: <http://localhost:5070/swagger>
+Prometheus metrics: <http://localhost:5070/metrics>
+
+## Test
+
+```bash
+dotnet test
+```
+
+Integration tests use `EphemeralMongo`, so no MongoDB instance is required to run them.
+
+## Build container
+
+```bash
+docker build -f src/Service/Dockerfile -t {{SERVICE_NAME_KEBAB}}:latest .
+```

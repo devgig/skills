@@ -1,0 +1,46 @@
+{
+  "Serilog": {
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "Microsoft.AspNetCore": "Warning",
+        "System": "Warning"
+      }
+    },
+    "WriteTo": [
+      {
+        "Name": "Console",
+        "Args": {
+          "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}"
+        }
+      },
+      {
+        "Name": "File",
+        "Args": {
+          "path": "logs/log-.txt",
+          "rollingInterval": "Day",
+          "outputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}"
+        }
+      }
+    ],
+    "Enrich": ["FromLogContext", "WithMachineName", "WithProcessId", "WithThreadId"],
+    "Properties": {
+      "Application": "{{SERVICE_NAME}}"
+    }
+  },
+  "OpenTelemetry": {
+    "Tempo": {
+      "Endpoint": "http://localhost:4317"
+    },
+    "ServiceName": "{{SERVICE_NAME}}",
+    "ServiceVersion": "1.0.0"
+  },
+  "ConnectionStrings": {
+    "MongoDB": "mongodb://localhost:27017/{{DATABASE_NAME}}"
+  },
+  "MongoDB": {
+    "DatabaseName": "{{DATABASE_NAME}}"
+  },
+  "AllowedHosts": "*"
+}

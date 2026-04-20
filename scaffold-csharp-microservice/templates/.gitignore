@@ -1,0 +1,30 @@
+## .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+
+## Test results & coverage
+TestResults/
+CoverageReport/
+coverage*.xml
+coverage*.json
+*.coverage
+
+## IDE
+.vs/
+.vscode/
+.idea/
+
+## Logs
+logs/
+*.log
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Secrets
+appsettings.*.local.json
+.env
+.env.local

@@ -1,0 +1,65 @@
+using FluentValidation;
+using Serilog;
+using Service.Extensions;
+using Service.Middleware;
+using System.Diagnostics.CodeAnalysis;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Configure Serilog
+builder.ConfigureSerilog();
+
+// Add services to the container.
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Add MediatR
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Application.AssemblyMarker).Assembly));
+
+// Add MongoDB
+builder.Services.AddMongoDb(builder.Configuration, builder.Environment);
+
+// -- Repository registrations (generated from entity specs in the PRP) --
+// {{REPOSITORY_REGISTRATIONS}}
+
+// Add FluentValidation
+builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+// Add exception handling
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+// Configure OpenTelemetry
+builder.Services.ConfigureOpenTelemetry(builder);
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
+app.MapPrometheusScrapingEndpoint();
+
+// -- Endpoint registrations (generated from endpoint specs in the PRP) --
+// {{ENDPOINT_REGISTRATIONS}}
+
+try
+{
+    Log.Information("Starting {{SERVICE_NAME}} application");
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
+
+[ExcludeFromCodeCoverage]
+public partial class Program { }

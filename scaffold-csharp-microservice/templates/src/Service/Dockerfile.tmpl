@@ -1,0 +1,32 @@
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
+
+COPY ./{{SERVICE_NAME}}/src/Service/Service.csproj /usr/src/build/Service/
+COPY ./{{SERVICE_NAME}}/src/Application/Application.csproj /usr/src/build/Application/
+COPY ./{{SERVICE_NAME}}/src/Domain/Domain.csproj /usr/src/build/Domain/
+COPY ./{{SERVICE_NAME}}/src/Infrastructure/Infrastructure.csproj /usr/src/build/Infrastructure/
+
+WORKDIR /usr/src/build/Service/
+RUN dotnet restore Service.csproj
+
+COPY ./{{SERVICE_NAME}}/src/ /usr/src/build/
+
+RUN dotnet publish Service.csproj -c Release -o /bin/publish/ --no-restore
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+
+ENV ASPNETCORE_HTTP_PORTS=8080
+ENV ASPNETCORE_URLS=http://+:8080
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+EXPOSE 8080
+
+LABEL app="{{SERVICE_NAME_KEBAB}}" \
+      service="{{SERVICE_NAME_KEBAB}}" \
+      version="v1"
+
+COPY --from=build-env /bin/publish/ /usr/src/app/
+
+WORKDIR /usr/src/app/
+
+ENTRYPOINT ["dotnet", "Service.dll"]

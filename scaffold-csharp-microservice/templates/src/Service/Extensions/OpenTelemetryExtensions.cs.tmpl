@@ -1,0 +1,101 @@
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+
+namespace Service.Extensions;
+
+[ExcludeFromCodeCoverage]
+public class ErrorAwareSampler : Sampler
+{
+    private readonly Sampler _baseSampler;
+    private readonly bool _isDevelopment;
+
+    public ErrorAwareSampler(bool isDevelopment)
+    {
+        _isDevelopment = isDevelopment;
+        _baseSampler = new TraceIdRatioBasedSampler(_isDevelopment ? 1.0 : 0.1);
+    }
+
+    public override SamplingResult ShouldSample(in SamplingParameters samplingParameters)
+    {
+        if (samplingParameters.Tags != null)
+        {
+            foreach (var tag in samplingParameters.Tags)
+            {
+                if (tag.Key == "error" ||
+                    tag.Key == "exception" ||
+                    tag.Key == "otel.status_code" && tag.Value?.ToString() == "ERROR")
+                {
+                    return new SamplingResult(SamplingDecision.RecordAndSample);
+                }
+            }
+        }
+
+        var activity = Activity.Current;
+        if (activity != null &&
+            (activity.Status == ActivityStatusCode.Error ||
+             activity.Tags.Any(t => t.Key == "error" || t.Key == "exception")))
+        {
+            return new SamplingResult(SamplingDecision.RecordAndSample);
+        }
+
+        return _baseSampler.ShouldSample(samplingParameters);
+    }
+}
+
+[ExcludeFromCodeCoverage]
+public static class OpenTelemetryExtensions
+{
+    public static IServiceCollection ConfigureOpenTelemetry(this IServiceCollection services, WebApplicationBuilder builder)
+    {
+        const string serviceName = "{{SERVICE_NAME}}";
+        const string serviceVersion = "1.0.0";
+
+        services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource
+                .AddService(serviceName, serviceVersion)
+                .AddAttributes(new Dictionary<string, object>
+                {
+                    ["deployment.environment"] = builder.Environment.EnvironmentName,
+                    ["host.name"] = Environment.MachineName
+                }))
+            .WithTracing(tracing =>
+            {
+                tracing
+                    .AddAspNetCoreInstrumentation(options =>
+                    {
+                        options.RecordException = true;
+                        options.EnrichWithHttpRequest = (activity, request) =>
+                        {
+                            activity.SetTag("http.request.method", request.Method);
+                            activity.SetTag("http.request.scheme", request.Scheme);
+                        };
+                        options.EnrichWithHttpResponse = (activity, response) =>
+                        {
+                            activity.SetTag("http.response.status_code", response.StatusCode);
+                        };
+                    })
+                    .AddHttpClientInstrumentation()
+                    .AddSource("MongoDB.Driver.Core.Extensions.DiagnosticSources")
+                    .AddSource(serviceName);
+
+                tracing
+                    .SetSampler(new ErrorAwareSampler(builder.Environment.IsDevelopment()))
+                    .AddOtlpExporter(options =>
+                    {
+                        options.Endpoint = new Uri(builder.Configuration.GetValue<string>("OpenTelemetry:Tempo:Endpoint") ?? "http://localhost:4317");
+                        options.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
+                    });
+            })
+            .WithMetrics(metrics => metrics
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddRuntimeInstrumentation()
+                .AddMeter(serviceName)
+                .AddPrometheusExporter());
+
+        return services;
+    }
+}
