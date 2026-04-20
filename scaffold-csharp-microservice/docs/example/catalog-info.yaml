@@ -1,0 +1,73 @@
+# Backstage descriptor for UserService.
+#
+# This file is GENERATED from spec.md §Service and contracts/users-api.yaml
+# by the scaffold-csharp-microservice skill. Do not hand-edit; edit the
+# spec and re-run the skill.
+#
+# The format follows https://backstage.io/docs/features/software-catalog/descriptor-format
+# and mirrors the layout of the real UserService's catalog-info.yaml.
+
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: userservice
+  title: User Service
+  description: A microservice for managing user data with CRUD operations and comprehensive observability.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - dotnet
+    - microservice
+    - api
+    - mongodb
+    - opentelemetry
+    - observability
+spec:
+  type: service
+  lifecycle: production
+  owner: dream-team
+  system: user-management
+  providesApis:
+    - userservice-api
+  dependsOn:
+    - resource:mongodb
+
+---
+
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: userservice-api
+  title: User Service API
+  description: RESTful API for user management operations.
+spec:
+  type: openapi
+  lifecycle: production
+  owner: dream-team
+  system: user-management
+  definition:
+    $text: ./contracts/users-api.yaml
+
+---
+
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: mongodb
+  title: MongoDB Database
+  description: MongoDB database for user data storage.
+spec:
+  type: database
+  owner: dream-team
+  system: user-management
+
+---
+
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: user-management
+  title: User Management System
+  description: Complete system for managing user lifecycle.
+spec:
+  owner: dream-team

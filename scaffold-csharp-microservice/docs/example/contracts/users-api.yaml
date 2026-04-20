@@ -1,0 +1,252 @@
+# HTTP contract for the User resource.
+#
+# OpenAPI 3.0-shaped. The scaffold reads this file to generate:
+#   - src/Service/Models/{Verb}{Resource}Request.cs
+#   - src/Service/Models/{Verb}{Resource}Response.cs
+#   - src/Service/Validators/{Verb}{Resource}RequestValidator.cs
+#   - src/Application/Commands/{Verb}{Resource}Command.cs   (POST/PUT/PATCH/DELETE)
+#   - src/Application/Queries/{Verb}{Resource}Query.cs      (GET)
+#   - src/Application/Handlers/{Verb}{Resource}{Command|Query}Handler.cs
+#   - src/Service/Endpoints/UserEndpoints.cs  (one Map... extension method per resource)
+#
+# x-handler is a custom extension: an ordered list of steps the skill
+# implements literally inside the handler. Do not describe LINQ/method
+# names — describe *what* the handler does.
+
+openapi: 3.0.0
+info:
+  title: User Service API
+  version: 1.0.0
+  description: RESTful API for user management operations.
+
+servers:
+  - url: http://localhost:5070
+    description: Local dev
+
+paths:
+
+  /api/user:
+    post:
+      operationId: CreateUser
+      summary: Create a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateUserResponse" }
+        "400": { $ref: "#/components/responses/ValidationProblem" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/ServerError" }
+      x-validation:
+        - FirstName required, max 50 chars
+        - LastName required, max 50 chars
+        - Email required, valid email format, max 100 chars
+      x-handler:
+        - Call IUserRepository.GetByEmailAsync(request.Email).
+        - If a user is returned, throw InvalidOperationException with message "User with email {email} already exists" — maps to 409 via GlobalExceptionHandler.
+        - Create a new User entity from the request fields.
+        - Call IUserRepository.SaveAsync(user) to persist (stamps CreatedAt).
+        - Return a CreateUserResponse with Id=Guid.Parse(savedUser.Id) and the saved fields.
+
+    get:
+      operationId: GetAllUsers
+      summary: List users (paginated)
+      parameters:
+        - name: PageNumber
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: PageSize
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GetAllUsersResponse" }
+        "400": { $ref: "#/components/responses/ValidationProblem" }
+        "500": { $ref: "#/components/responses/ServerError" }
+      x-validation:
+        - PageNumber >= 1
+        - PageSize between 1 and 100 inclusive
+      x-handler:
+        - Call IUserRepository.GetAllAsync().
+        - Project to UserDto (Guid id, FirstName, LastName, Email, CreatedAt, UpdatedAt).
+        - Skip (PageNumber-1)*PageSize and take PageSize.
+        - Return GetAllUsersResponse { Items, TotalCount, PageNumber, PageSize }.
+
+  /api/user/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: guid } }
+
+    get:
+      operationId: GetUserById
+      summary: Get user by id
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GetUserByIdResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+      x-handler:
+        - Call IUserRepository.GetByIdAsync(id.ToString()).
+        - If null, throw KeyNotFoundException — maps to 404.
+        - Return GetUserByIdResponse.
+
+    put:
+      operationId: UpdateUser
+      summary: Update user (full replace)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUserRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateUserResponse" }
+        "400": { $ref: "#/components/responses/ValidationProblem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+      x-validation:
+        - Same as CreateUser (FirstName/LastName max 50, Email valid + max 100)
+      x-handler:
+        - Load by id via IUserRepository.GetByIdAsync; throw KeyNotFoundException if null.
+        - Apply FirstName, LastName, Email from the request to the loaded entity.
+        - Call IUserRepository.SaveAsync to persist (stamps UpdatedAt).
+        - Return UpdateUserResponse with the saved fields.
+
+    patch:
+      operationId: PatchUser
+      summary: Patch user
+      description: Behaves identically to PUT in this reference; intentional parity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUserRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateUserResponse" }
+        "400": { $ref: "#/components/responses/ValidationProblem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+      x-handler:
+        - Identical to UpdateUser. Partial updates are not supported.
+
+    delete:
+      operationId: DeleteUser
+      summary: Delete user
+      responses:
+        "204": { description: No Content }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+      x-handler:
+        - Call IUserRepository.DeleteAsync(id.ToString()).
+        - Return 204 NoContent. (The reference does not pre-check existence; matches that.)
+
+  /api/user/by-email/{email}:
+    parameters:
+      - { name: email, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: GetUserByEmail
+      summary: Get user by email
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GetUserByEmailResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+      x-handler:
+        - Call IUserRepository.GetByEmailAsync(email).
+        - If null, throw KeyNotFoundException.
+        - Return GetUserByEmailResponse.
+
+components:
+
+  schemas:
+    CreateUserRequest:
+      type: object
+      required: [FirstName, LastName, Email]
+      properties:
+        FirstName: { type: string, maxLength: 50 }
+        LastName:  { type: string, maxLength: 50 }
+        Email:     { type: string, format: email, maxLength: 100 }
+
+    UpdateUserRequest:
+      $ref: "#/components/schemas/CreateUserRequest"
+
+    UserResponseBase:
+      type: object
+      properties:
+        Id:        { type: string, format: uuid }
+        FirstName: { type: string }
+        LastName:  { type: string }
+        Email:     { type: string }
+        CreatedAt: { type: string, format: date-time }
+        UpdatedAt: { type: string, format: date-time, nullable: true }
+
+    CreateUserResponse:    { $ref: "#/components/schemas/UserResponseBase" }
+    UpdateUserResponse:    { $ref: "#/components/schemas/UserResponseBase" }
+    GetUserByIdResponse:   { $ref: "#/components/schemas/UserResponseBase" }
+    GetUserByEmailResponse:{ $ref: "#/components/schemas/UserResponseBase" }
+
+    GetAllUsersResponse:
+      type: object
+      properties:
+        Items:
+          type: array
+          items: { $ref: "#/components/schemas/UserResponseBase" }
+        TotalCount: { type: integer }
+        PageNumber: { type: integer }
+        PageSize:   { type: integer }
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:      { type: string }
+        title:     { type: string }
+        status:    { type: integer }
+        detail:    { type: string }
+        instance:  { type: string }
+        traceId:   { type: string }
+        timestamp: { type: string, format: date-time }
+
+  responses:
+    ValidationProblem:
+      description: Validation failed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetails" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetails" }
+    Conflict:
+      description: Conflict (e.g., email already in use)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetails" }
+    ServerError:
+      description: Internal server error
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetails" }
