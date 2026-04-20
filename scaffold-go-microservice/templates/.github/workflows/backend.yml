@@ -1,0 +1,119 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - assets/backend/**
+      - kustomize/backend/**
+      - .github/workflows/backend.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - assets/backend/**
+      - kustomize/backend/**
+      - .github/workflows/backend.yml
+
+env:
+  IMAGE_REGISTRY: {{IMAGE_REGISTRY}}
+  IMAGE_REPO: {{IMAGE_REPO}}
+  GO_VERSION: "{{GO_VERSION}}"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: assets/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: assets/backend/go.sum
+
+      - name: go mod download
+        run: go mod download
+
+      - name: vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: test with coverage
+        run: go test -v -race -coverprofile=cover.out ./...
+
+      - name: upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: assets/backend/cover.out
+
+  build-and-push:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: assets/backend
+          file: assets/backend/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_REPO }}:${{ github.sha }}
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_REPO }}:latest
+
+  publish-manifests:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch image tag
+        run: |
+          cat > kustomize/backend/base/image-patch.yaml <<EOF
+          - op: replace
+            path: /spec/template/spec/containers/0/image
+            value: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_REPO }}:${{ github.sha }}
+          EOF
+
+      - name: Render manifests
+        run: |
+          mkdir -p manifests
+          if [ -d kustomize/backend/overlays/dev ]; then
+            kubectl kustomize kustomize/backend/overlays/dev > manifests/${{ env.IMAGE_REPO }}-dev.yaml
+          fi
+          if [ -d kustomize/backend/overlays/prod ]; then
+            kubectl kustomize kustomize/backend/overlays/prod > manifests/${{ env.IMAGE_REPO }}-prod.yaml
+          fi
+
+      - name: Upload manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifests
+          path: manifests/

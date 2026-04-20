@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{WORKLOAD_NAME}}
+  labels:
+    app: {{APP_LABEL}}
+    component: backend
+spec:
+  selector:
+    app: {{APP_LABEL}}
+    component: backend
+  ports:
+  - port: {{PORT}}
+    targetPort: {{PORT}}
+    name: http
+  type: ClusterIP

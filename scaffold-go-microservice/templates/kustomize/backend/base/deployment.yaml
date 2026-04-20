@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{WORKLOAD_NAME}}
+  labels:
+    app: {{APP_LABEL}}
+    component: backend
+spec:
+  progressDeadlineSeconds: 300
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: {{APP_LABEL}}
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: {{APP_LABEL}}
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{PORT}}"
+        prometheus.io/path: "/metrics"
+    spec:
+      imagePullSecrets:
+      - name: acr-secret
+      containers:
+      - name: {{WORKLOAD_NAME}}
+        image: {{WORKLOAD_NAME}}:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: {{PORT}}
+          name: http
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "32Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: {{PORT}}
+          initialDelaySeconds: 2
+          periodSeconds: 3
+          failureThreshold: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{PORT}}
+          periodSeconds: 60
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: {{PORT}}
+          periodSeconds: 10
+          failureThreshold: 3
