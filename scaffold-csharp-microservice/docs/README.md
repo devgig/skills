@@ -57,3 +57,10 @@ driven by Spec Kit, AWS Kiro, and Thoughtworks' writing on the subject.
 "PRP" is not a recognized term. Using the standard vocabulary makes specs
 portable across tools (Spec Kit, Kiro, plain markdown) and makes onboarding
 easier — engineers already know what a `spec.md` is.
+
+## drop PRD.md at repo root, then in Claude Code:
+-  /speckit.specify  @PRD.md — generate a comprehensive spec from this PRD, one feature per sub-directory under specs/
+-  /speckit.clarify                           # answers [NEEDS CLARIFICATION] markers
+-  /speckit.plan     <tech direction here>    # now plan.md, research.md, data-model.md, contracts/, quickstart.md
+-  /speckit.tasks
+-  /speckit.implement
