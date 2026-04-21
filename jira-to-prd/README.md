@@ -1,120 +1,70 @@
 # jira-to-prd — setup
 
-This skill needs a way to read Jira issues and Confluence pages. You
-have two options. Pick **one**; the skill probes for both at runtime
-and uses whichever answers first.
-
-1. **Atlassian Rovo MCP server** (nicer integration, known re-auth pain).
-2. **`acli` CLI fallback** (less elegant, rock-solid, doesn't expire
-   mid-session).
-
-The `acli` route is what most Claude Code users settle on after hitting
-the MCP re-auth issue a few times. If your sessions are short or you
-are evaluating the skill for the first time, start with the MCP; switch
-to `acli` the first time you see a mid-run 401.
+This skill reads Jira via [`acli`](https://developer.atlassian.com/cloud/acli/),
+Atlassian's official CLI, using an API token. **No MCP.** See the end
+of this doc for the reasoning — it matters for how you think about
+extending the skill.
 
 ---
 
-## Option 1 — Rovo MCP server (API-token auth)
+## One-time setup
 
-Atlassian's OAuth SSE endpoint (`/sse`) has a documented problem where
-the token expires every few hours and you have to re-auth mid-session.
-The HTTP endpoint with API-token auth does not have that issue. Use it.
-
-**Note:** The SSE endpoint is scheduled to be deprecated after June 30,
-2026. Use the HTTP transport below regardless.
-
-### One-time setup
-
-1. Create an Atlassian API token: https://id.atlassian.com/manage-profile/security/api-tokens
-2. Export it in your shell profile (`~/.zshrc` / `~/.bashrc`):
-
-   ```bash
-   export ATLASSIAN_EMAIL="you@example.com"
-   export ATLASSIAN_API_TOKEN="<token from step 1>"
-   ```
-
-3. Register the MCP server with Claude Code:
-
-   ```bash
-   claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp \
-     --header "Authorization: Bearer $(echo -n "$ATLASSIAN_EMAIL:$ATLASSIAN_API_TOKEN" | base64)"
-   ```
-
-4. Verify in a fresh Claude Code session:
-
-   ```
-   /mcp
-   ```
-
-   You should see `atlassian` listed as connected.
-
-### Known reliability caveat
-
-Even with API-token auth, some users report the MCP going silent after
-a few hours of idle time. If you see that, fall back to Option 2 — you
-do not need to remove the MCP config; the skill will prefer whichever
-source answers.
-
----
-
-## Option 2 — `acli` fallback
-
-`acli` is Atlassian's official CLI. Wrapped by this skill, a call like
-`acli jira workitem view BIO-456` is a stable, non-expiring read path
-that works regardless of MCP state.
-
-### Install
+### 1. Install `acli`
 
 **macOS (Homebrew):**
 
 ```bash
-brew install --cask atlassian-acli
+brew install --cask acli
 ```
 
-**Other platforms:** see https://developer.atlassian.com/cloud/acli/
+**Other platforms:** https://developer.atlassian.com/cloud/acli/
 
-### Authenticate
+### 2. Authenticate
 
 ```bash
-acli jira auth login
+acli jira auth login --web
 ```
 
-Follow the prompts. Credentials are stored in your OS keychain, not in
-this repo.
-
-### Verify
+This stores the API token in your OS keychain. No token in env vars,
+no token in repo configs, no token in shell history. If you also need
+Confluence:
 
 ```bash
-acli jira workitem view BIO-1   # replace with any real issue key you can read
+acli confluence auth login --web
 ```
 
-If this prints the issue without prompting, you are done.
-
-### Confluence
-
-`acli` supports Confluence too:
+### 3. Verify
 
 ```bash
-acli confluence auth login
-acli confluence page view --id <page-id>
+acli jira workitem view BIO-1 --json | head
 ```
 
-The skill uses `acli confluence` for linked pages when the MCP is not
-the active source.
+Replace `BIO-1` with any issue key you can read. JSON output with no
+auth prompt means you are done.
 
 ---
 
-## Picking a source
+## Commands the skill runs
 
-You do not need to tell the skill which source to use. At Phase 0 it:
+You don't run these yourself — the skill does — but here they are so
+you can reproduce exactly what it sees:
 
-1. Probes the `atlassian` MCP server with a no-op call.
-2. Falls back to `acli` if the MCP is missing or errors.
-3. Stops with a clear message if neither is available.
+```bash
+# The Feature
+acli jira workitem view "$KEY" --json
 
-Whatever it picks, it reports at the top of the run so you know which
-path produced the PRD.
+# All direct children (stories + subtasks)
+acli jira workitem search --jql "parent = $KEY" --json
+
+# Remote links (Confluence pages etc.) on any issue
+acli jira workitem view "$KEY" --fields "remotelinks" --json
+
+# A linked Confluence page
+acli confluence page view --id "$PAGE_ID" --output json
+```
+
+That's the entire data path. Byte-identical JSON in, a markdown PRD
+out.
 
 ---
 
@@ -122,17 +72,57 @@ path produced the PRD.
 
 | Symptom | Fix |
 |---|---|
-| `/mcp` shows `atlassian` as disconnected after a few hours | Expected — either restart Claude Code to re-auth, or rely on the `acli` fallback. |
-| `acli: command not found` | Install per Option 2, or re-source your shell. |
-| Skill reports "no Jira data source available" | Neither the MCP nor `acli` answered. Run `/mcp` and `acli jira workitem view <any-key>` manually to find which is broken. |
-| PRD has no Confluence content even though pages are linked | The linked pages may be in a space your token cannot read. Confirm with `acli confluence page view --id <id>`. |
-| Re-auth loop with the SSE endpoint | Do not use `/sse`. Use the HTTP endpoint shown in Option 1. |
+| `acli: command not found` | Install per step 1, then re-source your shell. |
+| `acli jira workitem view <key>` prompts for auth | Your token expired or was never stored. Re-run `acli jira auth login --web`. |
+| Skill reports "acli probe failed" | Run `acli jira auth status` yourself to see the underlying error. |
+| PRD has no Confluence content even though pages are linked | Either `acli confluence auth login` was never run, or the linked pages are in a space your token cannot read. Confirm with `acli confluence page view --id <id> --output json`. |
+| API token needs narrower scope | Re-mint the token at https://id.atlassian.com/manage-profile/security/api-tokens scoped read-only to the project(s) you care about. |
 
 ---
 
-## Why both?
+## Why CLI, not MCP
 
-The MCP gives the model structured tool calls and is more token-efficient
-for large hierarchies. `acli` is boring and reliable. Having both
-configured means a mid-run MCP outage degrades gracefully instead of
-halting the skill.
+This is a deliberate choice, worth capturing because it governs how
+you should extend the skill (and how you should design sibling skills
+for GitHub, Linear, etc.):
+
+1. **Determinism beats agentic flexibility once the workflow is
+   defined.** MCP's value is Claude discovering tools and composing
+   them dynamically. But "fetch a Feature + children + linked
+   Confluence, render against template" is a *known* workflow. You
+   don't want the LLM choosing between `searchJiraIssues` and
+   `getJiraIssue` differently each run. `acli ... --json` produces
+   byte-identical input every time; the only variability left is
+   Claude's rendering of the PRD. That's what a repeatable pipeline
+   feeding `/speckit.specify` needs.
+
+2. **Auth that doesn't expire mid-session.** The official Atlassian
+   MCP's OAuth/SSE path has the well-documented re-auth problem, and
+   even the newer `/mcp` endpoint with API tokens has been flaky.
+   `acli` with an API token has been stable for years and has no
+   session concept to expire.
+
+3. **Headless and portable.** A CLI runs in GitHub Actions on GKE,
+   cron jobs on K3s, and LiteLLM-fronted agents equally well. An MCP
+   server tied to an interactive OAuth flow does not, cleanly. Same
+   reasoning as choosing Workload Identity Federation + OIDC over SA
+   keys — the credential model should work in every execution context,
+   not just the interactive-terminal happy path.
+
+4. **Regulated-environment audit story.** When someone asks "what AI
+   tools are touching our Jira and what's the data path," the answer
+   "an API-token-scoped CLI on the engineer's machine, output captured
+   to a local markdown file" is a much cleaner story than "OAuth token
+   federated into Atlassian's cloud-hosted MCP gateway which talks to
+   a hosted model service." Fewer hops, fewer trust boundaries, token
+   scope is trivial to restrict to read-only on the relevant project.
+
+5. **Skill shape fits the existing stack.** The skill/PRP pattern is
+   already wired across the agent infrastructure. Adding a skill is a
+   twenty-minute job; wiring MCP into every agent is not.
+
+**The one case to flip back to MCP:** a team working primarily in
+Claude.ai web (not Claude Code) that won't run CLIs locally. The
+skill+CLI pattern does not exist in the web client, so Atlassian's
+Rovo MCP on Claude Teams/Enterprise is the right call there. That is
+not this setup.
